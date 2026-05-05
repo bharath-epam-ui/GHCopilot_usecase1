@@ -1,7 +1,8 @@
 # Manual Test Cases — Kata Task Manager
 
 > These are the source test cases participants will convert into automation scripts using GitHub Copilot.
-> App URL: https://kata-taskmanager.vercel.app
+> App URL: https://gh-copilot-usecase1.vercel.app
+> API Base URL: https://gh-copilot-usecase1.vercel.app
 
 ---
 
@@ -91,7 +92,7 @@
 **Steps:**
 1. Click the **All** filter button
 
-**Expected Result:** All tasks are displayed. Task count matches total seed data.
+**Expected Result:** All tasks are displayed. At least 5 tasks are visible (seed data). Task count shown at the bottom.
 
 ---
 
@@ -259,7 +260,7 @@
 ```
 **Expected Response:**
 - Status: `201 Created`
-- `data.id` is a non-empty string
+- `data.id` is a non-empty UUID string (e.g. `"3f2a1b4c-d5e6-..."`) — capture this for use in TC-API-014
 - `data.title` equals `"API test task"`
 - `data.status` equals `"todo"`
 - `data.priority` equals `"high"`
@@ -312,14 +313,14 @@
 ---
 
 ### TC-API-014: DELETE /api/tasks/:id — Delete Task
-**Precondition:** Create a new task first, capture its `id`
-**Method:** `DELETE /api/tasks/<id>`
+**Precondition:** Use the UUID task `id` captured from TC-API-009. Do NOT use seed task IDs (`t1`–`t5`) as deleting them will break TC-API-011 and TC-API-013.
+**Method:** `DELETE /api/tasks/<uuid-id>`
 **Headers:** `Authorization: Bearer <valid-token>`
 **Expected Response:**
 - Status: `200 OK`
 - Body contains `message: "Task deleted"`
 
-**Verify:** `GET /api/tasks/<id>` returns `404` after deletion.
+**Verify:** `GET /api/tasks/<uuid-id>` returns `404` after deletion.
 
 ---
 
