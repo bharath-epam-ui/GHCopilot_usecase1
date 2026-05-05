@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import { Redis } from "@upstash/redis";
 
 // Use Upstash Redis when env vars are present (production), fall back to in-memory (local dev)
-const USE_KV = !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+const USE_KV = !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
 
 // ── Static data ───────────────────────────────────────────────────────────────
 
@@ -52,8 +52,8 @@ let _redis: Redis | null = null;
 function getRedis(): Redis {
   if (!_redis) {
     _redis = new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL!,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+      url: process.env.KV_REST_API_URL!,
+      token: process.env.KV_REST_API_TOKEN!,
     });
   }
   return _redis;
