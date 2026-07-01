@@ -10,6 +10,7 @@ export interface Task {
   assignee: string;
   createdAt: string;
   updatedAt: string;
+  dueDate?: string;
 }
 
 export interface User {
