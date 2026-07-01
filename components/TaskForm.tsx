@@ -16,6 +16,7 @@ export default function TaskForm({ initial, onSubmit, onCancel, mode }: TaskForm
   const [status, setStatus] = useState<TaskStatus>(initial?.status ?? "todo");
   const [priority, setPriority] = useState<TaskPriority>(initial?.priority ?? "medium");
   const [assignee, setAssignee] = useState(initial?.assignee ?? "");
+  const [dueDate, setDueDate] = useState<string>(initial?.dueDate ?? "");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -28,7 +29,14 @@ export default function TaskForm({ initial, onSubmit, onCancel, mode }: TaskForm
     }
     setLoading(true);
     try {
-      await onSubmit({ title, description, status, priority, assignee });
+      await onSubmit({ 
+        title, 
+        description, 
+        status, 
+        priority, 
+        assignee,
+        dueDate: dueDate || undefined,
+      });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -117,6 +125,20 @@ export default function TaskForm({ initial, onSubmit, onCancel, mode }: TaskForm
           onChange={(e) => setAssignee(e.target.value)}
           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           placeholder="username"
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium mb-1" htmlFor="task-duedate">
+          Due Date
+        </label>
+        <input
+          id="task-duedate"
+          data-testid="task-duedate-input"
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
 

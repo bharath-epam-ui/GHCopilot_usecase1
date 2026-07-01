@@ -3,10 +3,11 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Task, TaskStatus } from "@/lib/types";
+import { isTaskOverdue } from "@/lib/utils";
 import TaskCard from "@/components/TaskCard";
 import TaskForm from "@/components/TaskForm";
 
-type FilterStatus = TaskStatus | "all";
+type FilterStatus = TaskStatus | "all" | "overdue";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -24,6 +25,20 @@ export default function DashboardPage() {
     async (status?: string) => {
       setLoading(true);
       setError("");
+      // Skip API call for "overdue" filter (client-side filtering)
+      if (status === "overdue") {
+        const res = await fetch("/api/tasks", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 401) {
+          router.push("/");
+          return;
+        }
+        const json = await res.json();
+        setTasks(json.data ?? []);
+        setLoading(false);
+        return;
+      }
       const url = status && status !== "all" ? `/api/tasks?status=${status}` : "/api/tasks";
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
@@ -113,7 +128,21 @@ export default function DashboardPage() {
     { label: "To Do", value: "todo" },
     { label: "In Progress", value: "in-progress" },
     { label: "Done", value: "done" },
+    { label: "Overdue", value: "overdue" },
   ];
+
+  /**
+   * Filters tasks based on the current filter selection.
+   * For "overdue", filters client-side. For other filters, tasks are already filtered by API.
+   */
+  function getFilteredTasks(): Task[] {
+    if (filter === "overdue") {
+      return tasks.filter(isTaskOverdue);
+    }
+    return tasks;
+  }
+
+  const displayTasks = getFilteredTasks();
 
   return (
     <div className="min-h-screen">
@@ -195,7 +224,7 @@ export default function DashboardPage() {
           <p className="text-gray-400 text-sm text-center py-12" data-testid="loading-indicator">
             Loading tasks…
           </p>
-        ) : tasks.length === 0 ? (
+        ) : displayTasks.length === 0 ? (
           <p className="text-gray-400 text-sm text-center py-12" data-testid="empty-state">
             No tasks found. Add one to get started!
           </p>
@@ -204,7 +233,7 @@ export default function DashboardPage() {
             className="grid gap-4 sm:grid-cols-2"
             data-testid="task-list"
           >
-            {tasks.map((task) => (
+            {displayTasks.map((task) => (
               <TaskCard
                 key={task.id}
                 task={task}

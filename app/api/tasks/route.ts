@@ -29,10 +29,23 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const { title, description, status, priority, assignee } = body;
+  const { title, description, status, priority, assignee, dueDate } = body;
 
   if (!title || !title.trim()) {
     return NextResponse.json({ error: "title is required" }, { status: 400 });
+  }
+
+  // Validate dueDate if provided
+  if (dueDate !== undefined && dueDate !== null) {
+    // Check format: YYYY-MM-DD
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+      return NextResponse.json({ error: "dueDate must be in YYYY-MM-DD format" }, { status: 400 });
+    }
+    // Check validity (reject invalid dates like 2026-02-30)
+    const parsedDate = new Date(dueDate);
+    if (isNaN(parsedDate.getTime()) || parsedDate.toISOString().split('T')[0] !== dueDate) {
+      return NextResponse.json({ error: "dueDate is not a valid date" }, { status: 400 });
+    }
   }
 
   const validStatuses: TaskStatus[] = ["todo", "in-progress", "done"];
@@ -44,6 +57,7 @@ export async function POST(req: NextRequest) {
     status: validStatuses.includes(status) ? status : "todo",
     priority: validPriorities.includes(priority) ? priority : "medium",
     assignee: assignee?.trim() ?? username,
+    ...(dueDate !== undefined && { dueDate: dueDate || undefined }),
   });
 
   return NextResponse.json({ data: task, message: "Task created" }, { status: 201 });
