@@ -20,7 +20,11 @@ const statusLabels: Record<string, string> = {
   done: "Done",
 };
 
-function getTransition(status: TaskStatus): { label: string; nextStatus: TaskStatus; ariaLabel: string } {
+function getTransition(status: TaskStatus): {
+  label: string;
+  nextStatus: TaskStatus;
+  ariaLabel: string;
+} {
   switch (status) {
     case "todo":
       return { label: "Start", nextStatus: "in-progress", ariaLabel: "Start task" };
@@ -28,6 +32,10 @@ function getTransition(status: TaskStatus): { label: string; nextStatus: TaskSta
       return { label: "Complete", nextStatus: "done", ariaLabel: "Complete task" };
     case "done":
       return { label: "Reopen", nextStatus: "todo", ariaLabel: "Reopen task" };
+    default: {
+      // runtime guard for unexpected stored values; keeps UI stable
+      return { label: "Start", nextStatus: "in-progress", ariaLabel: "Start task" };
+    }
   }
 }
 
