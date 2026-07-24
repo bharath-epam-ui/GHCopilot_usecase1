@@ -1,0 +1,79 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>kata.taskmanager</groupId>
+  <artifactId>junit-tests</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+  <name>Kata Task Manager – JUnit Black-Box Tests</name>
+
+  <properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <junit.version>5.10.2</junit.version>
+    <restassured.version>5.4.0</restassured.version>
+    <jackson.version>2.17.2</jackson.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>io.rest-assured</groupId>
+      <artifactId>rest-assured</artifactId>
+      <version>${restassured.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>io.rest-assured</groupId>
+      <artifactId>json-path</artifactId>
+      <version>${restassured.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+        <configuration>
+          <useSystemClassLoader>false</useSystemClassLoader>
+          <includes>
+            <include>***Test.java</include>
+          </includes>
+          <systemPropertyes>
+            <systemProperty>
+              <name>baseUrl</name>
+              <value>${baseUrl}</value>
+            </systemProperty>
+          </systemProperties>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>test</id>
+      <properties>
+        <baseUrl>http://localhost:3000</baseUrl>
+      </properties>
+    </profile>
+  </profiles>
+</project>
