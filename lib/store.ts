@@ -107,6 +107,10 @@ function findUser(username: string, password: string): User | undefined {
 
 async function getAllTasks(username: string, status?: string, assignee?: string): Promise<Task[]> {
   let tasks = USE_KV ? await kvGetTasks(username) : memUserTasks(username);
+
+  // KT-23: exclude soft-deleted tasks by default
+  tasks = tasks.filter((t) => !t.deletedAt);
+
   if (status) tasks = tasks.filter((t) => t.status === status);
   if (assignee) tasks = tasks.filter((t) => t.assignee === assignee);
   return tasks;
@@ -146,13 +150,31 @@ async function updateTask(
   return tasks[index];
 }
 
-async function deleteTask(username: string, id: string): Promise<boolean> {
+async function softDeleteTask(username: string, id: string): Promise<{ ok: true; deletedAt: string } | null> {
   const tasks = USE_KV ? await kvGetTasks(username) : memUserTasks(username);
   const index = tasks.findIndex((t) => t.id === id);
-  if (index === -1) return false;
-  tasks.splice(index, 1);
+  if (index === -1) return null;
+
+  // Idempotent: already deleted -> keep existing marker
+  const existingDeletedAt = tasks[index].deletedAt;
+  const deletedAt = existingDeletedAt ?? new Date().toISOString();
+
+  tasks[index] = { ...tasks[index], deletedAt, updatedAt: new Date().toISOString() };
   if (USE_KV) await kvSaveTasks(username, tasks);
-  return true;
+
+  return { ok: true, deletedAt };
+}
+
+async function restoreTask(username: string, id: string): Promise<{ ok: true } | null> {
+  const tasks = USE_KV ? await kvGetTasks(username) : memUserTasks(username);
+  const index = tasks.findIndex((t) => t.id === id);
+  if (index === -1) return null;
+
+  // Idempotent: restoring a not-deleted task is OK
+  tasks[index] = { ...tasks[index], deletedAt: null, updatedAt: new Date().toISOString() };
+  if (USE_KV) await kvSaveTasks(username, tasks);
+
+  return { ok: true };
 }
 
 export const store = {
@@ -164,5 +186,6 @@ export const store = {
   getTaskById,
   createTask,
   updateTask,
-  deleteTask,
+  softDeleteTask,
+  restoreTask,
 };

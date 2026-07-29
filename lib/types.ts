@@ -10,6 +10,8 @@ export interface Task {
   assignee: string;
   createdAt: string;
   updatedAt: string;
+  /** KT-23: soft delete marker (ISO timestamp). Undefined/null means not deleted. */
+  deletedAt?: string | null;
 }
 
 export interface User {

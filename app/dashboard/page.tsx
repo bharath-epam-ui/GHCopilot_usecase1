@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Task, TaskStatus } from "@/lib/types";
 import TaskCard from "@/components/TaskCard";
 import TaskForm from "@/components/TaskForm";
+import DeleteConfirmModal from "@/components/DeleteConfirmModal";
+import UndoToast from "@/components/UndoToast";
 
 type FilterStatus = TaskStatus | "all";
 
@@ -17,6 +19,13 @@ export default function DashboardPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [username, setUsername] = useState("");
+
+  // KT-23 UI state
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [pendingTaskIds, setPendingTaskIds] = useState<Record<string, boolean>>({});
+  const [undoTask, setUndoTask] = useState<Task | null>(null);
+  const [showUndoToast, setShowUndoToast] = useState(false);
 
   const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
 
@@ -94,18 +103,68 @@ export default function DashboardPage() {
     fetchTasks(filter);
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm("Delete this task?")) return;
-    const res = await fetch(`/api/tasks/${id}`, {
+  // KT-23: Open confirmation modal (no request on cancel)
+  function handleDeleteRequest(id: string) {
+    const task = tasks.find((t) => t.id === id) ?? null;
+    setSelectedTask(task);
+    setDeleteModalOpen(true);
+  }
+
+  async function handleConfirmDelete() {
+    if (!selectedTask) return;
+
+    const task = selectedTask;
+    setPendingTaskIds((prev) => ({ ...prev, [task.id]: true }));
+    setDeleteModalOpen(false);
+
+    // Optimistic UI: remove from list immediately
+    setTasks((prev) => prev.filter((t) => t.id !== task.id));
+
+    const res = await fetch(`/api/tasks/${task.id}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` },
     });
+
     if (!res.ok) {
-      const json = await res.json();
-      setError(json.error ?? "Failed to delete task");
+      const json = await res.json().catch(() => ({}));
+      // rollback optimistic removal
+      setTasks((prev) => [task, ...prev]);
+      setError(json.message ?? json.error ?? "Failed to delete task");
+      setPendingTaskIds((prev) => ({ ...prev, [task.id]: false }));
       return;
     }
-    fetchTasks(filter);
+
+    // Show Undo toast (>=10s)
+    setUndoTask(task);
+    setShowUndoToast(true);
+    setPendingTaskIds((prev) => ({ ...prev, [task.id]: false }));
+  }
+
+  async function handleUndoDelete() {
+    if (!undoTask) return;
+    const task = undoTask;
+
+    setPendingTaskIds((prev) => ({ ...prev, [task.id]: true }));
+
+    const res = await fetch(`/api/tasks/${task.id}/restore`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      setError(json.message ?? json.error ?? "Failed to restore task");
+      setPendingTaskIds((prev) => ({ ...prev, [task.id]: false }));
+      setShowUndoToast(false);
+      setUndoTask(null);
+      return;
+    }
+
+    // Reinsert restored task
+    setTasks((prev) => [task, ...prev]);
+    setPendingTaskIds((prev) => ({ ...prev, [task.id]: false }));
+    setShowUndoToast(false);
+    setUndoTask(null);
   }
 
   const filters: { label: string; value: FilterStatus }[] = [
@@ -138,6 +197,31 @@ export default function DashboardPage() {
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
+        {/* KT-23: Delete confirmation modal */}
+        <DeleteConfirmModal
+          open={deleteModalOpen}
+          taskTitle={selectedTask?.title ?? ""}
+          loading={selectedTask ? !!pendingTaskIds[selectedTask.id] : false}
+          onCancel={() => {
+            setDeleteModalOpen(false);
+            setSelectedTask(null);
+          }}
+          onConfirm={handleConfirmDelete}
+        />
+
+        {/* KT-23: Undo toast (>=10s) */}
+        <UndoToast
+          open={showUndoToast}
+          message="Task deleted."
+          durationMs={10000}
+          disabled={undoTask ? !!pendingTaskIds[undoTask.id] : false}
+          onUndo={handleUndoDelete}
+          onClose={() => {
+            setShowUndoToast(false);
+            setUndoTask(null);
+          }}
+        />
+
         {/* Actions bar */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex gap-2" data-testid="status-filter">
@@ -158,7 +242,10 @@ export default function DashboardPage() {
           </div>
 
           <button
-            onClick={() => { setShowForm(true); setEditingTask(null); }}
+            onClick={() => {
+              setShowForm(true);
+              setEditingTask(null);
+            }}
             data-testid="add-task-button"
             className="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition"
           >
@@ -168,7 +255,10 @@ export default function DashboardPage() {
 
         {/* Task form modal */}
         {(showForm || editingTask) && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" data-testid="task-modal">
+          <div
+            className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+            data-testid="task-modal"
+          >
             <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4">
               <h2 className="text-lg font-semibold mb-4">
                 {editingTask ? "Edit Task" : "New Task"}
@@ -177,7 +267,10 @@ export default function DashboardPage() {
                 initial={editingTask ?? undefined}
                 mode={editingTask ? "edit" : "create"}
                 onSubmit={editingTask ? handleUpdate : handleCreate}
-                onCancel={() => { setShowForm(false); setEditingTask(null); }}
+                onCancel={() => {
+                  setShowForm(false);
+                  setEditingTask(null);
+                }}
               />
             </div>
           </div>
@@ -200,16 +293,17 @@ export default function DashboardPage() {
             No tasks found. Add one to get started!
           </p>
         ) : (
-          <div
-            className="grid gap-4 sm:grid-cols-2"
-            data-testid="task-list"
-          >
+          <div className="grid gap-4 sm:grid-cols-2" data-testid="task-list">
             {tasks.map((task) => (
               <TaskCard
                 key={task.id}
                 task={task}
-                onEdit={(t) => { setEditingTask(t); setShowForm(false); }}
-                onDelete={handleDelete}
+                onEdit={(t) => {
+                  setEditingTask(t);
+                  setShowForm(false);
+                }}
+                onDelete={handleDeleteRequest}
+                isPending={!!pendingTaskIds[task.id]}
               />
             ))}
           </div>

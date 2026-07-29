@@ -24,9 +24,10 @@ interface TaskCardProps {
   task: Task;
   onEdit: (task: Task) => void;
   onDelete: (id: string) => void;
+  isPending?: boolean;
 }
 
-export default function TaskCard({ task, onEdit, onDelete }: TaskCardProps) {
+export default function TaskCard({ task, onEdit, onDelete, isPending = false }: TaskCardProps) {
   return (
     <div
       className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition"
@@ -45,17 +46,19 @@ export default function TaskCard({ task, onEdit, onDelete }: TaskCardProps) {
         <div className="flex gap-1 shrink-0">
           <button
             onClick={() => onEdit(task)}
+            disabled={isPending}
             data-testid="edit-task-button"
-            className="text-xs px-2 py-1 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-600 transition"
+            className="text-xs px-2 py-1 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-600 transition disabled:opacity-60"
           >
             Edit
           </button>
           <button
             onClick={() => onDelete(task.id)}
+            disabled={isPending}
             data-testid="delete-task-button"
-            className="text-xs px-2 py-1 rounded-md bg-red-50 hover:bg-red-100 text-red-600 transition"
+            className="text-xs px-2 py-1 rounded-md bg-red-50 hover:bg-red-100 text-red-600 transition disabled:opacity-60"
           >
-            Delete
+            {isPending ? "…" : "Delete"}
           </button>
         </div>
       </div>
