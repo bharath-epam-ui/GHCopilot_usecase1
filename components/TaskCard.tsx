@@ -1,6 +1,7 @@
 "use client";
 
 import { Task } from "@/lib/types";
+import { isTaskOverdue } from "@/lib/utils";
 
 const statusColors: Record<string, string> = {
   todo: "bg-gray-100 text-gray-700",
@@ -19,6 +20,22 @@ const statusLabels: Record<string, string> = {
   "in-progress": "In Progress",
   done: "Done",
 };
+
+/**
+ * Formats a YYYY-MM-DD date string for display.
+ * Example: "2026-12-31" -> "Dec 31, 2026"
+ */
+function formatDueDate(dateString: string): string {
+  try {
+    const date = new Date(dateString + "T00:00:00");
+    const month = date.toLocaleDateString("en-US", { month: "short" });
+    const day = date.getDate();
+    const year = date.getFullYear();
+    return `${month} ${day}, ${year}`;
+  } catch {
+    return dateString;
+  }
+}
 
 interface TaskCardProps {
   task: Task;
@@ -79,6 +96,19 @@ export default function TaskCard({ task, onEdit, onDelete }: TaskCardProps) {
         >
           {task.priority}
         </span>
+        {task.dueDate && (
+          <span className="text-xs text-gray-600" data-testid="task-duedate">
+            Due: {formatDueDate(task.dueDate)}
+          </span>
+        )}
+        {isTaskOverdue(task) && (
+          <span 
+            className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-600 text-white"
+            data-testid="task-overdue-badge"
+          >
+            OVERDUE
+          </span>
+        )}
         <span className="text-xs text-gray-400 ml-auto" data-testid="task-assignee">
           @{task.assignee}
         </span>
