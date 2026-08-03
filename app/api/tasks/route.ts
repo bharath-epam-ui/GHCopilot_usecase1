@@ -17,8 +17,26 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status") ?? undefined;
   const assignee = searchParams.get("assignee") ?? undefined;
+  const search = searchParams.get("search") ?? undefined;
+  const priority = searchParams.get("priority") ?? undefined;
 
-  const tasks = await store.getAllTasks(username, status, assignee);
+  // Validate search length (max 200 characters)
+  if (search && search.length > 200) {
+    return NextResponse.json(
+      { error: "Search term too long. Maximum 200 characters allowed" },
+      { status: 400 }
+    );
+  }
+
+  // Validate priority value
+  if (priority && !["low", "medium", "high"].includes(priority)) {
+    return NextResponse.json(
+      { error: "Invalid priority value. Must be low, medium, or high" },
+      { status: 400 }
+    );
+  }
+
+  const tasks = await store.getAllTasks(username, status, assignee, search, priority);
   return NextResponse.json({ data: tasks });
 }
 

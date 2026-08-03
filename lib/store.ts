@@ -105,10 +105,25 @@ function findUser(username: string, password: string): User | undefined {
   return USERS.find((u) => u.username === username && u.password === password);
 }
 
-async function getAllTasks(username: string, status?: string, assignee?: string): Promise<Task[]> {
+async function getAllTasks(
+  username: string,
+  status?: string,
+  assignee?: string,
+  search?: string,
+  priority?: string
+): Promise<Task[]> {
   let tasks = USE_KV ? await kvGetTasks(username) : memUserTasks(username);
   if (status) tasks = tasks.filter((t) => t.status === status);
   if (assignee) tasks = tasks.filter((t) => t.assignee === assignee);
+  if (search) {
+    const searchLower = search.toLowerCase();
+    tasks = tasks.filter(
+      (t) =>
+        t.title.toLowerCase().includes(searchLower) ||
+        t.description.toLowerCase().includes(searchLower)
+    );
+  }
+  if (priority) tasks = tasks.filter((t) => t.priority === priority);
   return tasks;
 }
 

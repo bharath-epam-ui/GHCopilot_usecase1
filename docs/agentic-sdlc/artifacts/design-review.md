@@ -1,4 +1,430 @@
-# Design Review — KT-11: Task Due Dates and Overdue Tracking
+# Design Review — KT-12: Task Search and Advanced Filtering
+
+**Generated:** 2026-08-03  
+**Agent:** 03 - Design Review Agent  
+**SDLC Stage:** 3 of 8  
+**Reviewed Artifact:** [architecture.md](architecture.md)
+
+---
+
+## Executive Summary
+
+**Review Status:** ✅ **GO** — Architecture approved with minor updates applied  
+**Overall Assessment:** The proposed architecture is sound, follows existing patterns, and meets all functional requirements. Three minor issues were identified and resolved during review.
+
+**Issues Found:**
+- 1 Medium severity issue (resolved)
+- 2 Low severity issues (resolved)
+
+**Changes Applied:**
+- Added explicit priority validation in API route handler
+- Added search term length validation (200 char limit)
+- Clarified debounce implementation to prevent race conditions
+
+---
+
+## Review Findings
+
+### Finding 1: Priority Validation Location Unclear
+
+**Severity:** 🟨 **Medium**  
+**Location:** Section 8 (API Contract Changes) and Section 9 (Store Logic Changes)  
+**Issue:**  
+Section 8 specifies that invalid priority values should return `400 Bad Request`, but Section 9 shows the store layer receiving the priority parameter directly without validation. The validation logic location is ambiguous — it should occur in the API route handler (`app/api/tasks/route.ts`) **before** calling `store.getAllTasks()`, not in the store layer.
+
+**Why This Matters:**  
+- Store layer should remain validation-agnostic (separation of concerns)
+- Invalid values passed to store could cause unexpected filter behavior
+- Consistent with existing pattern (status validation happens in API layer)
+
+**Resolution Applied:**  
+Updated architecture.md Section 8 to explicitly show validation code in GET handler:
+
+```typescript
+// In app/api/tasks/route.ts GET handler
+const priority = searchParams.get("priority") ?? undefined;
+
+// Validate priority before passing to store
+if (priority && !["low", "medium", "high"].includes(priority)) {
+  return NextResponse.json(
+    { error: "Invalid priority value. Must be low, medium, or high" },
+    { status: 400 }
+  );
+}
+
+const tasks = await store.getAllTasks(username, status, assignee, search, priority);
+```
+
+**Status:** ✅ **Resolved** — Architecture updated
+
+---
+
+### Finding 2: Search Term Length Validation Missing
+
+**Severity:** 🟩 **Low**  
+**Location:** Section 8 (API Contract Changes) and Section 9 (Store Logic Changes)  
+**Issue:**  
+NFR-03 specifies "Input sanitization: Search term length capped at 200 characters to prevent abuse." The API contract (Section 8) mentions "Max 200 chars" but the implementation (Section 9) does not show this validation.
+
+**Why This Matters:**  
+- Prevents potential denial-of-service via extremely long search terms
+- Enforces documented non-functional requirement
+- Aligns with security best practices
+
+**Resolution Applied:**  
+Updated architecture.md Section 8 to add search term length validation:
+
+```typescript
+// In app/api/tasks/route.ts GET handler
+const search = searchParams.get("search") ?? undefined;
+
+// Validate search term length
+if (search && search.length > 200) {
+  return NextResponse.json(
+    { error: "Search term too long. Maximum 200 characters allowed" },
+    { status: 400 }
+  );
+}
+```
+
+**Status:** ✅ **Resolved** — Architecture updated
+
+---
+
+### Finding 3: Debounce Race Condition Risk
+
+**Severity:** 🟩 **Low**  
+**Location:** Section 10 (UI Changes) — Debounce implementation  
+**Issue:**  
+The debounce implementation uses `useEffect` with a timeout, but the dependency array includes `[searchTerm, priorityFilter, filter]`. If a user types "api" (triggers debounce timer) and then immediately clicks a priority filter, two API calls may be triggered:
+1. The delayed call from typing (after 300ms)
+2. The immediate call from filter change
+
+This could cause flickering or stale data display.
+
+**Why This Matters:**  
+- Potential race condition if filter changes during debounce delay
+- Could result in displaying stale data
+- Extra unnecessary API calls
+
+**Resolution Applied:**  
+Updated architecture.md Section 10 to use a more robust debounce pattern:
+
+```typescript
+// Separate debounced search from immediate filters
+useEffect(() => {
+  const timer = setTimeout(() => {
+    fetchTasks();
+  }, 300);
+  return () => clearTimeout(timer);
+}, [searchTerm]); // Only debounce search input
+
+useEffect(() => {
+  fetchTasks(); // Immediate fetch for filter changes
+}, [priorityFilter, filter]);
+```
+
+**Status:** ✅ **Resolved** — Architecture updated
+
+---
+
+## Detailed Review by Area
+
+### 1. Correctness ✅
+
+**Evaluation Criteria:** Does each component behave as specified in requirements.md?
+
+| Requirement | Architecture Coverage | Status |
+|-------------|----------------------|--------|
+| FR-01: GET /api/tasks?search= | Section 8 & 9 — search param extraction + filtering | ✅ Complete |
+| FR-02: GET /api/tasks?priority= | Section 8 & 9 — priority param extraction + filtering | ✅ Complete |
+| FR-03: Combined filters | Section 5 & 9 — sequential filter application | ✅ Complete |
+| FR-04: Dashboard search input | Section 10 — UI component + state | ✅ Complete |
+| FR-05: Dashboard priority filter chip | Section 10 — UI component + state | ✅ Complete |
+| FR-06: Combined UI filters | Section 10 — fetchTasks builds combined query string | ✅ Complete |
+| FR-07: Empty state for no results | Section 10 — conditional empty state message | ✅ Complete |
+| FR-08: Backward compatibility | Section 12 — explicit compatibility statement | ✅ Complete |
+
+**Finding:** All functional requirements are addressed in the architecture. No gaps identified.
+
+---
+
+### 2. Security ✅
+
+**Evaluation Criteria:** Are secrets excluded? Is user input validated?
+
+| Security Concern | Mitigation | Status |
+|------------------|------------|--------|
+| **Search input injection** | In-memory string matching (`.includes()`), no database queries | ✅ Safe |
+| **Priority value injection** | Validation against whitelist `["low", "medium", "high"]` | ✅ Safe (after Finding 1 resolved) |
+| **Search term length abuse** | Max 200 character limit enforced | ✅ Safe (after Finding 2 resolved) |
+| **Authentication bypass** | No changes to auth pattern; existing Bearer token validation remains | ✅ Safe |
+| **Secrets exposure** | No new environment variables or secrets introduced | ✅ Safe |
+
+**Finding:** Security posture is sound. Input validation added per Findings 1 & 2.
+
+---
+
+### 3. Error Handling ✅
+
+**Evaluation Criteria:** Are all API failures, missing fields, and edge cases handled gracefully?
+
+| Error Case | Handling Strategy | Status |
+|------------|-------------------|--------|
+| Invalid priority value | Return 400 with descriptive error | ✅ Handled |
+| Search term too long | Return 400 with descriptive error | ✅ Handled |
+| Empty search result | Return 200 with `{ data: [] }` + empty state UI | ✅ Handled |
+| Missing authentication token | Existing 401 handler (unchanged) | ✅ Handled |
+| API request timeout | Client-side error handling (existing pattern) | ✅ Handled |
+| Tasks without priority field | Not possible — priority is required field | ✅ N/A |
+
+**Finding:** Error handling is comprehensive. All edge cases covered.
+
+---
+
+### 4. Test Coverage ✅
+
+**Evaluation Criteria:** Do the planned changes cover happy path AND edge cases?
+
+**Note:** Test implementation is Stage 5 (Implementation). This review evaluates whether the architecture is **testable**.
+
+| Test Scenario | Testability | Notes |
+|---------------|-------------|-------|
+| Search with matching results | ✅ Testable | Mock store with sample tasks |
+| Search with no results | ✅ Testable | Verify empty array response |
+| Priority filter with matching results | ✅ Testable | Filter by each priority value |
+| Combined search + priority + status | ✅ Testable | Test AND logic |
+| Invalid priority value | ✅ Testable | Verify 400 response |
+| Search term > 200 chars | ✅ Testable | Verify 400 response |
+| Empty state UI with filters active | ✅ Testable | Use `data-testid="empty-state"` |
+| Debounced search input | ✅ Testable | Mock timers in unit test |
+
+**Finding:** Architecture is fully testable. All components have clear boundaries and `data-testid` attributes for UI testing.
+
+---
+
+### 5. Code Clarity ✅
+
+**Evaluation Criteria:** Are names self-explanatory? Is logic easy to follow?
+
+| Component | Clarity Assessment |
+|-----------|-------------------|
+| **Variable names** | `searchTerm`, `priorityFilter`, `searchLower` — clear and descriptive ✅ |
+| **Function names** | `getAllTasks`, `fetchTasks`, `setSearchTerm` — follow existing conventions ✅ |
+| **Data flow** | Sequential filtering in store → easy to trace ✅ |
+| **Component structure** | Follows existing pattern (state → fetch → render) ✅ |
+| **Comment needs** | Minimal — code is self-documenting ✅ |
+
+**Finding:** Code clarity is excellent. Follows existing project conventions.
+
+---
+
+### 6. DRY Principle ✅
+
+**Evaluation Criteria:** Is there duplicated logic that can be shared?
+
+| Potential Duplication | Resolution |
+|-----------------------|------------|
+| Filter logic (status, assignee, search, priority) | ✅ Centralized in `store.getAllTasks()` — no duplication |
+| Query parameter extraction | ✅ Uses `searchParams.get()` for all params — consistent pattern |
+| Empty state message | ✅ Single conditional in dashboard — no duplication |
+| Validation logic (priority) | ✅ Inline whitelist check — simple, no need to extract |
+
+**Finding:** No code duplication identified. DRY principle upheld.
+
+---
+
+### 7. Dependency Safety ✅
+
+**Evaluation Criteria:** Any known-vulnerable packages added?
+
+**Analysis:**  
+- ✅ No new npm packages added
+- ✅ Uses native JavaScript string methods (`.toLowerCase()`, `.includes()`, `.filter()`)
+- ✅ Uses existing React hooks (`useState`, `useEffect`, `useCallback`)
+- ✅ No changes to `package.json`
+
+**Finding:** Zero new dependencies. No security risk from external packages.
+
+---
+
+## Design Decisions Approved
+
+The following design choices are approved and will guide Stage 4 (Implementation Planning):
+
+### Decision 1: Server-Side Filtering (Not Client-Side)
+**Rationale:** All filtering logic in `lib/store.ts` keeps business logic centralized and testable. Client-side filtering would scatter logic across UI components.  
+**Approved:** ✅ Yes
+
+### Decision 2: Search on Title and Description Only
+**Rationale:** Per Requirements FR-01, search is limited to these two fields. No need to search assignee, status, or id.  
+**Approved:** ✅ Yes
+
+### Decision 3: Priority Filter as Exclusive Chips (Not Multi-Select)
+**Rationale:** Consistent with existing status filter UI pattern. Simpler implementation. Per Requirements Q2 answer.  
+**Approved:** ✅ Yes
+
+### Decision 4: Debounce Search at 300ms
+**Rationale:** Balances responsiveness with API call efficiency. Per NFR-01 and Requirements Q1 answer.  
+**Approved:** ✅ Yes
+
+### Decision 5: Empty State Message Conditional on Active Filters
+**Rationale:** Per FR-07, users need to know if no results are due to filters vs. no tasks created yet.  
+**Approved:** ✅ Yes
+
+### Decision 6: No New API Route for Search
+**Rationale:** Extend existing `GET /api/tasks` with optional query params. Backward compatible and RESTful.  
+**Approved:** ✅ Yes
+
+---
+
+## Backward Compatibility Verification ✅
+
+**Critical Check:** No breaking changes allowed per NFR-02.
+
+| Compatibility Concern | Verification | Status |
+|-----------------------|--------------|--------|
+| **API clients omitting new params** | `search` and `priority` are optional; default behavior unchanged | ✅ Compatible |
+| **Existing task data** | No schema migration; priority already exists; search uses existing fields | ✅ Compatible |
+| **UI test selectors** | New `data-testid` added; existing ones unchanged | ✅ Compatible |
+| **Seed tasks `t1`–`t5`** | Not modified | ✅ Compatible |
+| **Store function signature** | Optional params appended; TypeScript allows omission | ✅ Compatible |
+| **Authentication** | No changes to auth pattern | ✅ Compatible |
+
+**Confirmation:** 100% backward compatible. All existing clients and tests will continue to work.
+
+---
+
+## Architecture Updates Applied
+
+The following changes were made to [architecture.md](architecture.md) to address review findings:
+
+### Update 1: Added Priority Validation Code (Finding 1)
+
+**Section 8 — API Contract Changes**
+
+Added explicit validation logic to GET handler:
+
+```typescript
+// Validate priority parameter
+const priority = searchParams.get("priority") ?? undefined;
+if (priority && !["low", "medium", "high"].includes(priority)) {
+  return NextResponse.json(
+    { error: "Invalid priority value. Must be low, medium, or high" },
+    { status: 400 }
+  );
+}
+```
+
+**Rationale:** Clarifies that validation happens in API layer before calling store.
+
+---
+
+### Update 2: Added Search Term Length Validation (Finding 2)
+
+**Section 8 — API Contract Changes**
+
+Added length check to GET handler:
+
+```typescript
+// Validate search term length
+const search = searchParams.get("search") ?? undefined;
+if (search && search.length > 200) {
+  return NextResponse.json(
+    { error: "Search term too long. Maximum 200 characters allowed" },
+    { status: 400 }
+  );
+}
+```
+
+**Rationale:** Enforces NFR-03 security requirement.
+
+---
+
+### Update 3: Improved Debounce Implementation (Finding 3)
+
+**Section 10 — UI Changes**
+
+Replaced single `useEffect` with two separate effects:
+
+```typescript
+// Debounce search input only
+useEffect(() => {
+  const timer = setTimeout(() => {
+    fetchTasks();
+  }, 300);
+  return () => clearTimeout(timer);
+}, [searchTerm]);
+
+// Immediate fetch for filter changes
+useEffect(() => {
+  fetchTasks();
+}, [priorityFilter, filter]);
+```
+
+**Rationale:** Prevents race conditions when filters change during search debounce delay.
+
+---
+
+## Risk Assessment
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| **Performance degradation** (> 100 tasks) | Low | Medium | Monitor usage; add pagination if needed (documented in architecture) |
+| **UI clutter** (search + priority adds complexity) | Low | Low | Responsive design planned; mobile collapse |
+| **Debounce delay feels slow** | Low | Low | User testing recommended; 300ms is standard |
+| **Empty state confusion** | Very Low | Low | Clear messaging implemented |
+
+**Overall Risk Level:** 🟢 **Low** — All risks have documented mitigations.
+
+---
+
+## Go / No-Go Decision
+
+### ✅ **GO — Proceed to Stage 4 (Implementation Plan)**
+
+**Rationale:**
+
+1. **All functional requirements covered** — FR-01 through FR-08 fully addressed
+2. **All non-functional requirements met** — Performance, security, accessibility, backward compatibility
+3. **All review findings resolved** — 3 issues identified and fixed during review
+4. **No breaking changes** — 100% backward compatible
+5. **No new dependencies** — Uses existing stack
+6. **Clear implementation path** — 3 files to modify, no new files needed
+7. **Testable design** — All components have clear boundaries and test hooks
+
+**Conditions for Proceeding:**
+- ✅ Medium severity issue (priority validation) resolved
+- ✅ Low severity issues (search length, debounce) resolved
+- ✅ Architecture.md updated with validation code
+- ✅ Backward compatibility verified
+
+**Sign-Off:**  
+This design is approved for implementation. Stage 4 (Implementation Planning) may proceed.
+
+---
+
+## Recommendations for Stage 4
+
+1. **Test Coverage:** Ensure unit tests cover all validation edge cases (invalid priority, search term > 200 chars)
+2. **Performance Testing:** Add a manual test with 100+ tasks to verify < 500ms response time
+3. **UI/UX Review:** Consider adding a "Clear all filters" button if user testing shows confusion
+4. **Documentation:** Update API documentation with new query parameter examples
+5. **Accessibility:** Verify keyboard navigation (Tab, Enter) works for search input and priority chips
+
+---
+
+## Conclusion
+
+The proposed architecture for KT-12 (Task Search and Advanced Filtering) is **well-designed, secure, and implementable**. Three minor issues were identified during review and immediately resolved through architecture updates. The design maintains 100% backward compatibility, introduces zero breaking changes, and follows all project conventions.
+
+**Status:** ✅ **Approved — Ready for Implementation Planning (Stage 4)**
+
+---
+
+**Review Completed:** 2026-08-03  
+**Reviewer:** Design Review Agent (Stage 3)  
+**Next Stage:** 04 - Implementation Plan
 
 **Generated:** 2026-07-01  
 **Agent:** 03 - Design Review Agent  

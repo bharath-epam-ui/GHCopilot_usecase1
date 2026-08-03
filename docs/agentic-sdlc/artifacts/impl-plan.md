@@ -1,4 +1,267 @@
-# Implementation Plan — KT-11: Task Due Dates and Overdue Tracking
+# Implementation Plan — KT-12: Task Search and Advanced Filtering
+
+**Generated:** 2026-08-03  
+**Agent:** 04 - Implementation Plan Agent  
+**SDLC Stage:** 4 of 8  
+**Source:** [architecture.md](architecture.md) | [design-review.md](design-review.md)
+
+---
+
+## Summary
+
+This plan implements keyword search (`?search=`) and priority filtering (`?priority=`) for the Task Manager. The feature extends the existing `GET /api/tasks` API route with two new optional query parameters, adds filtering logic to the store layer, and introduces search input + priority filter UI controls on the dashboard.
+
+**Files to Modify:** 3  
+**Files to Create:** 3 (test files)  
+**Total Tasks:** 12 (6 feature tasks + 6 test tasks)  
+**Estimated Effort:** 2-3 days (Medium complexity)
+
+---
+
+## Section 1: Prioritized, Dependency-Ordered Task List
+
+### Layer 1: Store Layer (Data Persistence)
+
+**TASK-01** | File: `lib/store.ts` | **S** | Priority: **HIGH** | Extend `getAllTasks` signature with `search` and `priority` optional parameters  
+**Description:** Add two new optional parameters (`search?: string`, `priority?: string`) to the `getAllTasks` function signature. Update the function body to apply filtering logic:
+- If `priority` is provided, filter tasks by exact match: `tasks.filter(t => t.priority === priority)`
+- If `search` is provided, filter tasks by case-insensitive substring match on title OR description: `tasks.filter(t => t.title.toLowerCase().includes(searchLower) || t.description.toLowerCase().includes(searchLower))`
+- Apply new filters AFTER existing status and assignee filters (sequential filtering)
+
+**TASK-02** | File: `lib/store.test.ts` | **M** | Priority: **HIGH** | Unit tests for store filtering logic  
+**Description:** Test the extended `getAllTasks` function with the following test cases:
+1. **Priority filter:** getAllTasks with `priority="high"` returns only high-priority tasks
+2. **Priority filter:** getAllTasks with `priority="low"` returns only low-priority tasks
+3. **Priority filter:** getAllTasks with `priority="medium"` returns only medium-priority tasks
+4. **Priority filter:** getAllTasks with `priority=undefined` returns all tasks (no filter applied)
+5. **Search filter:** getAllTasks with `search="login"` returns tasks with "login" in title
+6. **Search filter:** getAllTasks with `search="api"` returns tasks with "api" in description
+7. **Search filter:** getAllTasks with `search="xyz"` returns empty array (no matches)
+8. **Search filter:** getAllTasks with `search=undefined` returns all tasks (no filter applied)
+9. **Search case-insensitive:** getAllTasks with `search="LOGIN"` matches tasks with "login" in any case
+10. **Combined filters:** getAllTasks with `status="todo"`, `priority="high"`, `search="api"` returns only tasks matching ALL three conditions
+11. **Combined filters:** getAllTasks with `priority="high"`, `assignee="admin"` returns only high-priority tasks for admin
+12. **Empty result:** Combined filters return empty array when no tasks match
+
+**Mocks:** Mock `kvGetTasks` and `memUserTasks` to return known task arrays  
+**Coverage Target:** 95% (all branches, including no-filter paths)  
+**Validation:** `npm test -- store.test`
+
+---
+
+### Layer 2: API Layer (Route Handlers)
+
+**TASK-03** | File: `app/api/tasks/route.ts` | **M** | Priority: **HIGH** | Add `search` and `priority` query parameter extraction and validation to GET handler  
+**Description:** In the `GET` function:
+1. Extract `search` query param: `const search = searchParams.get("search") ?? undefined;`
+2. Validate search length (NFR-03): If `search && search.length > 200`, return `400` with error `"Search term too long. Maximum 200 characters allowed"`
+3. Extract `priority` query param: `const priority = searchParams.get("priority") ?? undefined;`
+4. Validate priority value: If `priority && !["low", "medium", "high"].includes(priority)`, return `400` with error `"Invalid priority value. Must be low, medium, or high"`
+5. Pass validated `search` and `priority` to `store.getAllTasks(username, status, assignee, search, priority)`
+
+**TASK-04** | File: `app/api/tasks/route.test.ts` | **M** | Priority: **HIGH** | Integration tests for API route with new query params  
+**Description:** Test the GET handler with the following test cases:
+1. **Search filter:** `GET /api/tasks?search=login` returns 200 with tasks containing "login"
+2. **Search filter:** `GET /api/tasks?search=xyz` returns 200 with empty data array
+3. **Search case-insensitive:** `GET /api/tasks?search=LOGIN` returns same results as lowercase
+4. **Search validation:** `GET /api/tasks?search={201 chars}` returns 400 with error message
+5. **Priority filter:** `GET /api/tasks?priority=high` returns 200 with only high-priority tasks
+6. **Priority filter:** `GET /api/tasks?priority=low` returns 200 with only low-priority tasks
+7. **Priority validation:** `GET /api/tasks?priority=invalid` returns 400 with error message
+8. **Combined filters:** `GET /api/tasks?status=todo&priority=high&search=api` returns 200 with tasks matching all filters
+9. **Auth check:** `GET /api/tasks?search=login` without Bearer token returns 401
+10. **Backward compatibility:** `GET /api/tasks` (no new params) returns all tasks (existing behavior)
+
+**Mocks:** Mock `store.getAllTasks` to return controlled task arrays; mock `store.validateToken` for auth  
+**Coverage Target:** 90% (cover validation, auth, error paths)  
+**Validation:** `npm test -- route.test`
+
+---
+
+### Layer 3: UI Layer (Dashboard Components)
+
+**TASK-05** | File: `app/dashboard/page.tsx` | **L** | Priority: **MED** | Add search input, priority filter chips, and update fetchTasks logic  
+**Description:** UI changes:
+1. Add state variables: `const [searchTerm, setSearchTerm] = useState("");` and `const [priorityFilter, setPriorityFilter] = useState<"all" | TaskPriority>("all");`
+2. Add search input component above task list with `data-testid="search-input"`, placeholder "Search tasks...", bound to `searchTerm` state
+3. Add priority filter chip group with buttons for "All", "Low", "Medium", "High" (similar to status filter chips), each with `data-testid="filter-priority-{value}"`, bound to `priorityFilter` state
+4. Update `fetchTasks` function to build query string with new params:
+   - If `priorityFilter !== "all"`, add `params.set("priority", priorityFilter)`
+   - If `searchTerm.trim()`, add `params.set("search", searchTerm.trim())`
+5. Implement debounce for search input using two separate `useEffect` hooks:
+   - Hook 1: Debounce `searchTerm` changes (300ms delay) → `fetchTasks()`
+   - Hook 2: Immediate `fetchTasks()` on `priorityFilter` or `filter` changes (no debounce)
+6. Update empty state message to check if filters are active: show "No tasks match the selected filters. Try adjusting your search or filters." if `searchTerm || priorityFilter !== "all" || filter !== "all"`, else show default "No tasks yet. Click 'Add Task' to create one."
+
+**TASK-06** | File: `app/dashboard/page.test.tsx` | **L** | Priority: **MED** | Component tests for dashboard search and priority filter UI  
+**Description:** Test the dashboard UI with the following test cases:
+1. **Search input present:** renders search input with correct data-testid
+2. **Priority filter present:** renders priority filter chip group with All/Low/Medium/High buttons
+3. **Search interaction:** typing in search input updates state and triggers debounced fetch
+4. **Priority interaction:** clicking priority filter chip updates state and triggers immediate fetch
+5. **Combined filters:** selecting status + priority + search builds correct query string
+6. **Empty state (with filters):** displays filter-specific empty message when no tasks match
+7. **Empty state (no filters):** displays default empty message when no filters active
+8. **Debounce timing:** search input does not trigger fetch immediately (300ms delay verified)
+9. **Clear search:** clearing search input resets to all tasks
+10. **Filter reset:** clicking "All" on priority filter removes priority param from query
+
+**Mocks:** Mock `fetch` to return controlled task arrays; mock `localStorage` for token; mock `useRouter` for navigation  
+**Coverage Target:** 75% (focus on user interactions and conditional rendering)  
+**Validation:** `npm test -- page.test`
+
+---
+
+## Section 2: Blocked Tasks
+
+| Task | Blocked By | Reason |
+|------|------------|--------|
+| **TASK-02** | TASK-01 | Unit tests require `getAllTasks` signature to be updated with new params |
+| **TASK-03** | TASK-01 | API route must call updated `store.getAllTasks` with new params |
+| **TASK-04** | TASK-03 | Integration tests require API route to accept and validate new query params |
+| **TASK-05** | TASK-03 | UI must call updated API endpoint with new query params |
+| **TASK-06** | TASK-05 | Component tests require UI components to be implemented |
+
+**Execution Order:** TASK-01 → TASK-02 → TASK-03 → TASK-04 → TASK-05 → TASK-06
+
+**Parallel Work Opportunities:**  
+- TASK-02 can start as soon as TASK-01 is committed (dev can work on tests while another dev reviews TASK-01)
+- TASK-04 can start as soon as TASK-03 is committed
+- TASK-06 can start as soon as TASK-05 is committed
+
+---
+
+## Section 3: Validation Plan
+
+### Task-Specific Validation Checks
+
+| Task | Validation Criteria | Pass Condition |
+|------|---------------------|----------------|
+| **TASK-01** | TypeScript compiles; `getAllTasks` accepts 5 parameters (username, status?, assignee?, search?, priority?) | `npm run build` succeeds; no type errors |
+| **TASK-02** | All unit tests pass; coverage meets 95% target | `npm test -- store.test` exits 0; coverage report shows 95%+ |
+| **TASK-03** | API route extracts and validates new query params; returns 400 for invalid inputs | Manual test: `GET /api/tasks?priority=invalid` → 400; `GET /api/tasks?search={201 chars}` → 400 |
+| **TASK-04** | All integration tests pass; coverage meets 90% target | `npm test -- route.test` exits 0; coverage report shows 90%+ |
+| **TASK-05** | Search input and priority filter chips render; fetchTasks builds query string correctly | Manual test: type "api" → debounce → fetch called with `?search=api`; click "High" → immediate fetch with `?priority=high` |
+| **TASK-06** | All component tests pass; coverage meets 75% target | `npm test -- page.test` exits 0; coverage report shows 75%+ |
+
+### Feature-Level Validation (End-to-End)
+
+**After all tasks complete, verify:**
+
+1. **Search functionality:**
+   - Type "login" in search input → only tasks with "login" in title/description shown
+   - Type "xyz" → empty state message "No tasks match the selected filters"
+   - Clear search → all tasks shown
+
+2. **Priority filter functionality:**
+   - Click "High" priority chip → only high-priority tasks shown
+   - Click "Low" priority chip → only low-priority tasks shown
+   - Click "All" → all tasks shown
+
+3. **Combined filters:**
+   - Select Status="To Do" + Priority="High" + Search="api" → only tasks matching ALL three conditions shown
+   - Empty state shown if no matches
+
+4. **Backward compatibility:**
+   - Existing manual test cases TC-01 to TC-29 pass without modification
+   - API clients not using new params receive identical responses
+
+5. **Performance:**
+   - Search response time < 500ms for 100 tasks (per NFR-01)
+   - Search debounce delay feels responsive (300ms)
+
+---
+
+## Section 4: Out-of-Scope Reminder
+
+The following features are **explicitly excluded** from this implementation (per `requirements.md` Section 4: Non-Goals):
+
+### ❌ Out of Scope
+
+1. **Advanced search operators** (AND/OR, wildcards, regex) — Use simple substring matching only
+2. **Saved search presets** or user-defined filters — No persistence of filter state
+3. **Faceted filtering UI** (multi-select checkboxes) — Single priority selection only (chip buttons)
+4. **Search performance optimization** (indexing, caching) — In-memory filtering is sufficient for current task volumes
+5. **Search result highlighting** — Do not highlight matched terms in task cards
+6. **Backend pagination** — Client receives all filtered tasks in one response
+
+### Why These Are Excluded
+
+- **Complexity vs. value:** The simple search/filter meets 90% of user needs with 10% of the complexity
+- **Task volume assumption:** Users have < 100 tasks — advanced optimizations not needed yet
+- **Consistent with existing patterns:** Status and assignee filters use the same simple approach
+
+### Scope Creep Prevention
+
+If any of the above features are requested during implementation:
+1. ✋ **Stop work** — Do not implement
+2. 📝 **Document request** — Add to backlog as a separate story
+3. 🔄 **Return to this plan** — Continue with approved scope only
+
+---
+
+## Risk Management
+
+### Implementation Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| **Debounce race condition** | Low | Medium | Use separate useEffect hooks for search (debounced) vs. filters (immediate) per architecture update |
+| **Test coverage gaps** | Medium | High | Each feature task followed immediately by test task; use coverage reports to verify targets |
+| **Breaking existing tests** | Low | High | Run full test suite after each task; existing manual tests TC-01 to TC-29 must pass |
+| **Performance regression** | Low | Medium | Test with 100+ tasks manually; verify < 500ms response time |
+
+### Rollback Plan
+
+If deployment fails or critical bug found:
+1. Revert 3 commits (one per file: store.ts, route.ts, page.tsx)
+2. Verify existing tests pass
+3. Redeploy previous version
+4. Estimated rollback time: < 10 minutes
+
+---
+
+## Definition of Done
+
+A task is considered **complete** when:
+
+✅ Code changes implemented as specified  
+✅ Corresponding test task completed (if applicable)  
+✅ All tests pass (`npm test`)  
+✅ TypeScript compiles without errors (`npm run build`)  
+✅ ESLint shows no new warnings (`npm run lint`)  
+✅ Manual validation criteria met (see Section 3)  
+✅ Code reviewed by peer (Stage 6)  
+✅ Backward compatibility verified (existing tests pass)
+
+**The feature is done when all 12 tasks meet the above criteria.**
+
+---
+
+## Next Steps
+
+This implementation plan is ready for **Stage 5 (Implementation Agent)**. The agent will:
+1. Execute tasks in order (TASK-01 through TASK-06)
+2. Write code changes to the specified files
+3. Write tests immediately after each feature task
+4. Validate each task using the criteria in Section 3
+5. Document all changes in `implementation-log.md`
+
+**Prerequisites for Stage 5:**
+- ✅ Architecture approved (Stage 2 complete)
+- ✅ Design review passed with GO (Stage 3 complete)
+- ✅ Implementation plan generated (Stage 4 complete)
+- ✅ Test strategy consulted (test tasks included)
+
+**Approval to Proceed:** ✅ **Ready for Implementation (Stage 5)**
+
+---
+
+**Plan Generated:** 2026-08-03  
+**Total Tasks:** 12 (6 feature + 6 test)  
+**Estimated Duration:** 2-3 days  
+**Files Modified:** 3 | **Files Created:** 3 (tests)  
+**Test Coverage Target:** Store 95% | API 90% | UI 75%
 
 **Generated:** 2026-07-01  
 **Agent:** 04 - Implementation Plan Agent  
