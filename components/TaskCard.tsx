@@ -1,6 +1,7 @@
 "use client";
 
-import { Task } from "@/lib/types";
+import { useState, useEffect } from "react";
+import { Task, TaskStatus } from "@/lib/types";
 
 const statusColors: Record<string, string> = {
   todo: "bg-gray-100 text-gray-700",
@@ -24,9 +25,36 @@ interface TaskCardProps {
   task: Task;
   onEdit: (task: Task) => void;
   onDelete: (id: string) => void;
+  onStatusChange?: (id: string, newStatus: TaskStatus) => Promise<void>;
 }
 
-export default function TaskCard({ task, onEdit, onDelete }: TaskCardProps) {
+export default function TaskCard({ task, onEdit, onDelete, onStatusChange }: TaskCardProps) {
+  const [optimisticStatus, setOptimisticStatus] = useState<TaskStatus>(task.status);
+  const [isChangingStatus, setIsChangingStatus] = useState(false);
+  const [statusError, setStatusError] = useState("");
+
+  useEffect(() => {
+    setOptimisticStatus(task.status);
+  }, [task.status]);
+
+  const handleInlineStatusChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newStatus = e.target.value as TaskStatus;
+    const previousStatus = optimisticStatus;
+    setOptimisticStatus(newStatus);
+    setIsChangingStatus(true);
+    try {
+      if (onStatusChange) {
+        await onStatusChange(task.id, newStatus);
+      }
+    } catch (err) {
+      setOptimisticStatus(previousStatus);
+      setStatusError(err instanceof Error ? err.message : "Failed to update status");
+      setTimeout(() => setStatusError(""), 3000);
+    } finally {
+      setIsChangingStatus(false);
+    }
+  };
+
   return (
     <div
       className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition"
@@ -67,12 +95,31 @@ export default function TaskCard({ task, onEdit, onDelete }: TaskCardProps) {
       )}
 
       <div className="flex flex-wrap gap-2 items-center">
-        <span
-          className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColors[task.status]}`}
-          data-testid="task-status"
-        >
-          {statusLabels[task.status]}
-        </span>
+        <div className="flex flex-col gap-1">
+          {/* sr-only span: textContent === statusLabels[optimisticStatus] for FR-04 / NFR-02 assertions */}
+          <span data-testid="task-status" className="sr-only">
+            {statusLabels[optimisticStatus]}
+          </span>
+
+          <select
+            data-testid="inline-status-select"
+            aria-label="Change status"
+            value={optimisticStatus}
+            disabled={isChangingStatus}
+            onChange={handleInlineStatusChange}
+            className={`text-xs font-medium px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors[optimisticStatus]}`}
+          >
+            <option value="todo"        data-testid="inline-status-option-todo">To Do</option>
+            <option value="in-progress" data-testid="inline-status-option-in-progress">In Progress</option>
+            <option value="done"        data-testid="inline-status-option-done">Done</option>
+          </select>
+
+          {statusError && (
+            <p data-testid="inline-status-error" className="text-red-500 text-xs mt-1">
+              {statusError}
+            </p>
+          )}
+        </div>
         <span
           className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${priorityColors[task.priority]}`}
           data-testid="task-priority"

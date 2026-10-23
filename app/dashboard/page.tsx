@@ -108,6 +108,25 @@ export default function DashboardPage() {
     fetchTasks(filter);
   }
 
+  const handleStatusChange = useCallback(
+    async (id: string, newStatus: TaskStatus): Promise<void> => {
+      const res = await fetch(`/api/tasks/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) {
+        const json = await res.json();
+        throw new Error(json.error ?? "Failed to update status");
+      }
+      fetchTasks(filter);
+    },
+    [token, filter, fetchTasks]
+  );
+
   const filters: { label: string; value: FilterStatus }[] = [
     { label: "All", value: "all" },
     { label: "To Do", value: "todo" },
@@ -210,6 +229,7 @@ export default function DashboardPage() {
                 task={task}
                 onEdit={(t) => { setEditingTask(t); setShowForm(false); }}
                 onDelete={handleDelete}
+                onStatusChange={handleStatusChange}
               />
             ))}
           </div>
