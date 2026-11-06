@@ -37,6 +37,12 @@ export default function TaskCard({ task, onEdit, onDelete, onStatusChange }: Tas
     setOptimisticStatus(task.status);
   }, [task.status]);
 
+  useEffect(() => {
+    if (!statusError) return;
+    const timerId = setTimeout(() => setStatusError(""), 3000);
+    return () => clearTimeout(timerId);
+  }, [statusError]);
+
   const handleInlineStatusChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newStatus = e.target.value as TaskStatus;
     const previousStatus = optimisticStatus;
@@ -49,7 +55,7 @@ export default function TaskCard({ task, onEdit, onDelete, onStatusChange }: Tas
     } catch (err) {
       setOptimisticStatus(previousStatus);
       setStatusError(err instanceof Error ? err.message : "Failed to update status");
-      setTimeout(() => setStatusError(""), 3000);
+      // No setTimeout here — useEffect manages the timer
     } finally {
       setIsChangingStatus(false);
     }
@@ -97,13 +103,13 @@ export default function TaskCard({ task, onEdit, onDelete, onStatusChange }: Tas
       <div className="flex flex-wrap gap-2 items-center">
         <div className="flex flex-col gap-1">
           {/* sr-only span: textContent === statusLabels[optimisticStatus] for FR-04 / NFR-02 assertions */}
-          <span data-testid="task-status" className="sr-only">
+          <span data-testid="task-status" className="sr-only" aria-live="polite" aria-atomic="true">
             {statusLabels[optimisticStatus]}
           </span>
 
           <select
-            data-testid="inline-status-select"
-            aria-label="Change status"
+            data-testid="task-status-select"
+            aria-label={`Change status for ${task.title}`}
             value={optimisticStatus}
             disabled={isChangingStatus}
             onChange={handleInlineStatusChange}
@@ -115,7 +121,7 @@ export default function TaskCard({ task, onEdit, onDelete, onStatusChange }: Tas
           </select>
 
           {statusError && (
-            <p data-testid="inline-status-error" className="text-red-500 text-xs mt-1">
+            <p data-testid="task-status-error" className="text-red-500 text-xs mt-1">
               {statusError}
             </p>
           )}
