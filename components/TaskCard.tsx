@@ -54,7 +54,7 @@ export default function TaskCard({ task, onEdit, onDelete, onStatusChange }: Tas
       }
     } catch (err) {
       setOptimisticStatus(previousStatus);
-      setStatusError(err instanceof Error ? err.message : "Failed to update status");
+      setStatusError(err instanceof Error ? err.message : "Failed to update status. Please try again.");
       // No setTimeout here — useEffect manages the timer
     } finally {
       setIsChangingStatus(false);
