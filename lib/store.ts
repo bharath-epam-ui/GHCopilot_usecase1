@@ -54,24 +54,33 @@ function getRedis(): Redis {
     _redis = new Redis({
       url: process.env.KV_REST_API_URL!,
       token: process.env.KV_REST_API_TOKEN!,
+      retry: false,
     });
   }
   return _redis;
 }
 
+function withTimeout<T>(promise: Promise<T>, ms = 5000): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Redis operation timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 async function kvGetTasks(username: string): Promise<Task[]> {
   const redis = getRedis();
-  const existing = await redis.get<Task[]>(kvTaskKey(username));
+  const existing = await withTimeout(redis.get<Task[]>(kvTaskKey(username)));
   if (existing) return existing;
-  // First login for this user — seed their personal task list
   const seeded = SEED_TASKS.map((t) => ({ ...t }));
-  await redis.set(kvTaskKey(username), seeded);
+  await withTimeout(redis.set(kvTaskKey(username), seeded));
   return seeded;
 }
 
 async function kvSaveTasks(username: string, tasks: Task[]): Promise<void> {
   const redis = getRedis();
-  await redis.set(kvTaskKey(username), tasks);
+  await withTimeout(redis.set(kvTaskKey(username), tasks));
 }
 
 // ── Public async store API ────────────────────────────────────────────────────
@@ -79,7 +88,7 @@ async function kvSaveTasks(username: string, tasks: Task[]): Promise<void> {
 async function generateToken(username: string): Promise<string> {
   const token = Buffer.from(`${username}:${Date.now()}:${Math.random()}`).toString("base64url");
   if (USE_KV) {
-    await getRedis().set(kvTokenKey(token), username, { ex: TOKEN_TTL });
+    await withTimeout(getRedis().set(kvTokenKey(token), username, { ex: TOKEN_TTL }));
   } else {
     memTokens().set(token, username);
   }
@@ -88,14 +97,14 @@ async function generateToken(username: string): Promise<string> {
 
 async function validateToken(token: string): Promise<string | null> {
   if (USE_KV) {
-    return await getRedis().get<string>(kvTokenKey(token));
+    return await withTimeout(getRedis().get<string>(kvTokenKey(token)));
   }
   return memTokens().get(token) ?? null;
 }
 
 async function invalidateToken(token: string): Promise<void> {
   if (USE_KV) {
-    await getRedis().del(kvTokenKey(token));
+    await withTimeout(getRedis().del(kvTokenKey(token)));
   } else {
     memTokens().delete(token);
   }
