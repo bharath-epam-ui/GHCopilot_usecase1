@@ -88,41 +88,77 @@ async function kvSaveTasks(username: string, tasks: Task[]): Promise<void> {
 async function generateToken(username: string): Promise<string> {
   const token = Buffer.from(`${username}:${Date.now()}:${Math.random()}`).toString("base64url");
   if (USE_KV) {
-    await withTimeout(getRedis().set(kvTokenKey(token), username, { ex: TOKEN_TTL }));
-  } else {
-    memTokens().set(token, username);
+    try {
+      await withTimeout(getRedis().set(kvTokenKey(token), username, { ex: TOKEN_TTL }));
+      return token;
+    } catch (err) {
+      console.warn("Redis unavailable (generateToken), using in-memory:", (err as Error).message);
+    }
   }
+  memTokens().set(token, username);
   return token;
 }
 
 async function validateToken(token: string): Promise<string | null> {
   if (USE_KV) {
-    return await withTimeout(getRedis().get<string>(kvTokenKey(token)));
+    try {
+      const result = await withTimeout(getRedis().get<string>(kvTokenKey(token)));
+      if (result !== null) return result;
+    } catch (err) {
+      console.warn("Redis unavailable (validateToken), using in-memory:", (err as Error).message);
+    }
   }
   return memTokens().get(token) ?? null;
 }
 
 async function invalidateToken(token: string): Promise<void> {
   if (USE_KV) {
-    await withTimeout(getRedis().del(kvTokenKey(token)));
-  } else {
-    memTokens().delete(token);
+    try {
+      await withTimeout(getRedis().del(kvTokenKey(token)));
+    } catch (err) {
+      console.warn("Redis unavailable (invalidateToken):", (err as Error).message);
+    }
   }
+  memTokens().delete(token);
 }
 
 function findUser(username: string, password: string): User | undefined {
   return USERS.find((u) => u.username === username && u.password === password);
 }
 
+async function resolveTasks(username: string): Promise<Task[]> {
+  if (USE_KV) {
+    try {
+      return await kvGetTasks(username);
+    } catch (err) {
+      console.warn("Redis unavailable (getTasks), using in-memory:", (err as Error).message);
+    }
+  }
+  return memUserTasks(username);
+}
+
+async function persistTasks(username: string, tasks: Task[]): Promise<void> {
+  if (USE_KV) {
+    try {
+      await kvSaveTasks(username, tasks);
+      return;
+    } catch (err) {
+      console.warn("Redis unavailable (saveTasks), using in-memory:", (err as Error).message);
+    }
+  }
+  if (!globalThis.__kata_tasks_map) globalThis.__kata_tasks_map = new Map();
+  globalThis.__kata_tasks_map.set(username, tasks);
+}
+
 async function getAllTasks(username: string, status?: string, assignee?: string): Promise<Task[]> {
-  let tasks = USE_KV ? await kvGetTasks(username) : memUserTasks(username);
+  let tasks = await resolveTasks(username);
   if (status) tasks = tasks.filter((t) => t.status === status);
   if (assignee) tasks = tasks.filter((t) => t.assignee === assignee);
   return tasks;
 }
 
 async function getTaskById(username: string, id: string): Promise<Task | undefined> {
-  const tasks = USE_KV ? await kvGetTasks(username) : memUserTasks(username);
+  const tasks = await resolveTasks(username);
   return tasks.find((t) => t.id === id);
 }
 
@@ -130,7 +166,7 @@ async function createTask(
   username: string,
   data: Omit<Task, "id" | "createdAt" | "updatedAt">
 ): Promise<Task> {
-  const tasks = USE_KV ? await kvGetTasks(username) : memUserTasks(username);
+  const tasks = await resolveTasks(username);
   const task: Task = {
     ...data,
     id: randomUUID(),
@@ -138,7 +174,7 @@ async function createTask(
     updatedAt: new Date().toISOString(),
   };
   tasks.push(task);
-  if (USE_KV) await kvSaveTasks(username, tasks);
+  await persistTasks(username, tasks);
   return task;
 }
 
@@ -147,20 +183,20 @@ async function updateTask(
   id: string,
   data: Partial<Omit<Task, "id" | "createdAt">>
 ): Promise<Task | null> {
-  const tasks = USE_KV ? await kvGetTasks(username) : memUserTasks(username);
+  const tasks = await resolveTasks(username);
   const index = tasks.findIndex((t) => t.id === id);
   if (index === -1) return null;
   tasks[index] = { ...tasks[index], ...data, updatedAt: new Date().toISOString() };
-  if (USE_KV) await kvSaveTasks(username, tasks);
+  await persistTasks(username, tasks);
   return tasks[index];
 }
 
 async function deleteTask(username: string, id: string): Promise<boolean> {
-  const tasks = USE_KV ? await kvGetTasks(username) : memUserTasks(username);
+  const tasks = await resolveTasks(username);
   const index = tasks.findIndex((t) => t.id === id);
   if (index === -1) return false;
   tasks.splice(index, 1);
-  if (USE_KV) await kvSaveTasks(username, tasks);
+  await persistTasks(username, tasks);
   return true;
 }
 
