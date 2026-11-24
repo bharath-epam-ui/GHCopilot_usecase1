@@ -17,9 +17,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 
-  const token = await store.generateToken(username);
-  return NextResponse.json({
-    data: { token, name: user.name, username: user.username },
-    message: "Login successful",
-  });
+  try {
+    const token = await store.generateToken(username);
+    return NextResponse.json({
+      data: { token, name: user.name, username: user.username },
+      message: "Login successful",
+    });
+  } catch (err) {
+    console.error("Token generation failed:", err);
+    return NextResponse.json(
+      { error: "Authentication service unavailable. Please try again." },
+      { status: 503 }
+    );
+  }
 }

@@ -15,24 +15,37 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
 
-    const json = await res.json();
-    setLoading(false);
+      let json: { error?: string; data?: { token: string; username: string; name: string } };
+      try {
+        json = await res.json();
+      } catch {
+        setError("Server error. Please try again.");
+        setLoading(false);
+        return;
+      }
 
-    if (!res.ok) {
-      setError(json.error ?? "Login failed");
-      return;
+      setLoading(false);
+
+      if (!res.ok) {
+        setError(json.error ?? "Login failed");
+        return;
+      }
+
+      localStorage.setItem("token", json.data!.token);
+      localStorage.setItem("username", json.data!.username);
+      localStorage.setItem("name", json.data!.name);
+      router.push("/dashboard");
+    } catch {
+      setLoading(false);
+      setError("Network error. Please try again.");
     }
-
-    localStorage.setItem("token", json.data.token);
-    localStorage.setItem("username", json.data.username);
-    localStorage.setItem("name", json.data.name);
-    router.push("/dashboard");
   }
 
   return (
